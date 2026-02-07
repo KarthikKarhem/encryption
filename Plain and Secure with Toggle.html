@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secure AES Encryption & Decryption Tool</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f9;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+    .section {
+      margin-bottom: 40px;
+    }
+    label {
+      font-weight: bold;
+    }
+    input, button, textarea {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    textarea {
+      height: 150px;
+    }
+    .toggle-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .toggle-container label {
+      font-weight: normal;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Secure AES Encryption & Decryption Tool</h1>
+
+  <div class="container">
+    <!-- Encryption Section -->
+    <div class="section">
+      <h2>Encryption</h2>
+      <label for="text-to-encrypt">Enter text to be encrypted:</label>
+      <textarea id="text-to-encrypt" placeholder="Enter text you want to encrypt"></textarea>
+
+      <div class="toggle-container">
+        <label for="use-passphrase">Use passphrase for encryption</label>
+        <input type="checkbox" id="use-passphrase" onchange="togglePassphraseField()" />
+      </div>
+
+      <label for="encryption-passphrase" id="passphrase-label" style="display:none;">Enter a secret passphrase (leave empty to auto-generate):</label>
+      <input type="password" id="encryption-passphrase" placeholder="Enter a strong passphrase" style="display:none;" />
+
+      <button onclick="encryptText()">Encrypt Text</button>
+
+      <label for="encrypted-text">Encrypted text (Base64 encoded):</label>
+      <textarea id="encrypted-text" readonly></textarea>
+
+      <button type="button" onclick="downloadKey()">Save Passphrase</button>
+    </div>
+
+    <!-- Decryption Section -->
+    <div class="section">
+      <h2>Decryption</h2>
+      <label for="text-to-decrypt">Enter encrypted text to decrypt:</label>
+      <textarea id="text-to-decrypt" placeholder="Paste encrypted text here"></textarea>
+
+      <label for="decryption-passphrase">Enter secret passphrase for decryption (optional):</label>
+      <input type="password" id="decryption-passphrase" placeholder="Enter the passphrase" />
+
+      <button onclick="decryptText()">Decrypt Text</button>
+
+      <label for="decrypted-text">Decrypted text:</label>
+      <textarea id="decrypted-text" readonly></textarea>
+    </div>
+  </div>
+
+  <script>
+    let generatedPassphrase = '';  // Variable to store the auto-generated passphrase
+
+    // Helper function to generate a random passphrase (16 characters)
+    function generateRandomPassphrase() {
+      const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
+      let passphrase = '';
+      for (let i = 0; i < 16; i++) {
+        const randomIndex = Math.floor(Math.random() * charset.length);
+        passphrase += charset[randomIndex];
+      }
+      return passphrase;
+    }
+
+    // Base64 encode function (for plain encryption without passphrase)
+    function base64Encode(text) {
+      return btoa(unescape(encodeURIComponent(text)));
+    }
+
+    // Save the passphrase to a .txt file
+    function downloadKey() {
+      const passphrase = document.getElementById('encryption-passphrase').value || generatedPassphrase;
+
+      if (!passphrase) {
+        alert("No passphrase provided! Please generate or enter a passphrase.");
+        return;
+      }
+
+      const blob = new Blob([passphrase], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'encryption-key.txt';
+      link.click();
+    }
+
+    // Derive an AES key from a passphrase using PBKDF2
+    async function deriveKey(passphrase, salt) {
+      const keyMaterial = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(passphrase),
+        { name: "PBKDF2" },
+        false,
+        ["deriveKey"]
+      );
+
+      const key = await crypto.subtle.deriveKey(
+        {
+          name: "PBKDF2",
+          salt: salt,
+          iterations: 100000,
+          hash: "SHA-256",
+        },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+
+      return key;
+    }
+
+    // Encrypt text using AES-GCM
+    async function encryptText() {
+      const text = document.getElementById('text-to-encrypt').value;
+      let passphrase = document.getElementById('encryption-passphrase').value;
+
+      if (!document.getElementById('use-passphrase').checked) {
+        // If no passphrase is provided and user opts for Base64 encoding
+        const encryptedText = base64Encode(text);
+        document.getElementById('encrypted-text').value = encryptedText;
+        return; // Exit the function, no need to proceed with AES encryption
+      }
+
+      // If a passphrase is provided, proceed with AES encryption
+      if (!passphrase) {
+        // Generate a random passphrase if not provided
+        passphrase = generateRandomPassphrase();
+        generatedPassphrase = passphrase;  // Store the generated passphrase
+        alert(`Generated random passphrase: ${passphrase}\nPlease save it for decryption!`);
+      }
+
+      const salt = crypto.getRandomValues(new Uint8Array(16)); // Generate random salt for key derivation
+      const iv = crypto.getRandomValues(new Uint8Array(12)); // Generate a random 12-byte IV for AES-GCM
+
+      try {
+        const key = await deriveKey(passphrase, salt); // Derive the key from the passphrase and salt
+        const encoder = new TextEncoder();
+        const data = encoder.encode(text);
+
+        const ciphertext = await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv: iv },
+          key,
+          data
+        );
+
+        // Base64 encode the ciphertext, IV, and salt
+        const ciphertextBase64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
+        const ivBase64 = btoa(String.fromCharCode(...iv));
+        const saltBase64 = btoa(String.fromCharCode(...salt));
+
+        document.getElementById('encrypted-text').value = `IV:${ivBase64}\nSalt:${saltBase64}\nCiphertext:${ciphertextBase64}`;
+
+      } catch (e) {
+        console.error("Encryption failed:", e);
+        alert("Encryption failed.");
+      }
+    }
+
+    // Decrypt text using AES-GCM
+    async function decryptText() {
+      const encryptedText = document.getElementById('text-to-decrypt').value;
+      let passphrase = document.getElementById('decryption-passphrase').value;
+
+      try {
+        // If the encrypted text is Base64 encoded (no AES encryption), decode it
+        if (encryptedText.indexOf("IV:") === -1) {
+          document.getElementById('decrypted-text').value = decodeURIComponent(escape(atob(encryptedText)));
+          return; // Exit since no AES decryption is required
+        }
+
+        // Parse the Base64 encoded encrypted text, IV, and salt for AES decryption
+        const encryptedLines = encryptedText.split("\n");
+        const ivBase64 = encryptedLines[0].split(":")[1].trim();
+        const saltBase64 = encryptedLines[1].split(":")[1].trim();
+        const ciphertextBase64 = encryptedLines[2].split(":")[1].trim();
+
+        const iv = new Uint8Array(atob(ivBase64).split("").map(c => c.charCodeAt(0)));
+        const salt = new Uint8Array(atob(saltBase64).split("").map(c => c.charCodeAt(0)));
+        const ciphertext = new Uint8Array(atob(ciphertextBase64).split("").map(c => c.charCodeAt(0)));
+
+        const key = await deriveKey(passphrase, salt); // Derive the key from the passphrase and salt
+
+        // Decrypt using AES-GCM
+        const decryptedData = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: iv },
+          key,
+          ciphertext
+        );
+
+        const decoder = new TextDecoder();
+        const decryptedText = decoder.decode(decryptedData);
+
+        document.getElementById('decrypted-text').value = decryptedText;
+
+      } catch (e) {
+        console.error("Decryption failed:", e);
+        alert("Decryption failed. Please check the passphrase and encrypted data.");
+      }
+    }
+
+    // Toggle the visibility of passphrase input field
+    function togglePassphraseField() {
+      const usePassphrase = document.getElementById('use-passphrase').checked;
+      const passphraseField = document.getElementById('encryption-passphrase');
+      const passphraseLabel = document.getElementById('passphrase-label');
+
+      if (usePassphrase) {
+        passphraseField.style.display = 'block';
+        passphraseLabel.style.display = 'block';
+      } else {
+        passphraseField.style.display = 'none';
+        passphraseLabel.style.display = 'none';
+      }
+    }
+
+    // Initialize the toggle for passphrase
+    togglePassphraseField();
+  </script>
+
+</body>
+</html>
